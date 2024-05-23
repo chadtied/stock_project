@@ -1,23 +1,31 @@
 import backtrader as bt
 import yfinance as yf
+import numpy as np
 import json
 import calendar
 import matplotlib.pyplot as plt
 from datetime import date
+import math
+import numpy_financial as npf
 
 
-#buy and hdold 策略
+#buy and hold 策略
 class BuyAndHold_More_Fund(bt.Strategy):
     params = dict(
         monthly_cash= 1000.0,  # amount of cash to buy every month
-    )
+        month_sum= 0,
+        withdraw= 0,
+        deposit= 0,
+    )  
 
     def start(self):
         # Activate the fund mode and set the default value at 100
-        self.broker.set_fundmode(fundmode=True, fundstartval=100.00)
-
+        #self.broker.set_fundmode(fundmode=True, fundstartval=100.00)
+        self.title= 'Buy and hold'
         self.cash_start = self.broker.get_cash()
-        self.val_start = 100.0
+        self.yearly_cash= dict()
+        self.yearly_value= dict()
+        #self.val_start = 100.0
         # Add a timer which will be called on the 1st trading day of the month
         self.add_timer(
             bt.timer.SESSION_START,  # when it will be called
@@ -25,19 +33,45 @@ class BuyAndHold_More_Fund(bt.Strategy):
             monthcarry=True,  # called on the 2nd day if the 1st is holiday
         )
 
-    def notify_timer(self, timer, when, *args, **kwargs):
-        # Add the influx of monthly cash to the broker
-        self.broker.add_cash(self.p.monthly_cash)
-        # buy available cash
-        target_value = self.broker.get_value() + self.p.monthly_cash
-        self.order_target_value(target= int(target_value*0.99))
-        self.buy()
-
     def stop(self):
-        # calculate the actual returns
-        self.froi = self.broker.get_fundvalue() - self.val_start
-        print('Fund Value: {:.2f}%'.format(self.froi))
-    
+        if(self.p.monthly_cash< 0):
+            self.p.withdraw= -self.p.withdraw
+        else:
+            self.p.deposit= self.p.withdraw
+            self.p.withdraw= 0
+
+        self.Roi= round((self.broker.getvalue()+ self.p.withdraw)/(self.cash_start+ self.p.deposit)-1,2)
+        self.CAGR= round(math.pow(self.Roi+1, 1/(self.p.month_sum/12))-1,2)
+        self.FinalBalance= round(cerebro.broker.getvalue()- self.cash_start- self.p.month_sum*ContributionAmount,2)
+        self.BestYear, self.WorstYear= self.YearReturn()
+
+    def notify_timer(self, timer, when, *args, **kwargs):
+        self.p.month_sum+= 1
+
+        if self.data.datetime.date(0).year not in self.yearly_cash:
+            self.yearly_cash[self.data.datetime.date(0).year]= 0
+            self.yearly_value[self.data.datetime.date(0).year]= self.broker.get_value()
+
+        if self.broker.get_value()+ self.p.monthly_cash> 0:
+            self.order_target_value(target=int((self.broker.get_value()+ self.p.monthly_cash) * 0.99))
+
+            self.p.withdraw+= self.p.monthly_cash
+            self.yearly_cash[self.data.datetime.date(0).year]+= self.p.monthly_cash
+
+            # Add the influx of monthly cash to the broker
+            self.broker.add_cash(self.p.monthly_cash)
+
+        else:   self.order_target_value(target= 0)
+
+    def YearReturn(self):
+            value= list(self.yearly_value.values())
+            cash= list(self.yearly_cash.values())
+            for year in range(len(value)):
+                if year== len(value)-1:
+                    value[year]= (self.broker.get_value()-cash[year])/value[year]- 1
+                else:   
+                    value[year]= (value[year+1]-cash[year])/value[year]- 1
+            return round(max(value),2), round(min(value),2)
     def notify_order(self, order):
         if order.status in [order.Submitted, order.Accepted]:
             # 訂單已提交/接受 - 什麼也不做
@@ -63,9 +97,9 @@ class BuyAndHold_More_Fund(bt.Strategy):
             trade.pnlcomm,
             trade.commission))
     def log(self, text, dt=None):
-        ''' 日誌函數，用於記錄策略的執行信息 '''
         dt = dt or self.data.datetime.date(0)
         print(f'{dt.isoformat()}, {text}')
+
 #線性策略
 class MyStrategy(bt.Strategy):
     
@@ -159,67 +193,183 @@ class MyStrategy(bt.Strategy):
             trade.pnlcomm,
             trade.commission))
 
-#獲取傳入json檔資料
-with open('./buy_and_hold.json', 'r') as f:
-    data = json.load(f)
+#索蒂諾比率
+class SortinoRatio(bt.Analyzer):
 
-#設立變數
-    #Portfolios= data['Portfolios']
-Timeperiod= data['EndYear']- data['StartYear']+ 1
-StartYear, StartMonth= data['StartYear'], data['FirstMonth']
-EndYear, EndMonth= data['EndYear'], data['LastMonth']
-EndYear= data['EndYear']
-initial_Amount= data['initialAmount']
-ContributionAmount= 0
-if data['CashFlows']== 'Contribute fixed amount':    ContributionAmount= data['ContributionAmount']
-elif data['CashFlows']== 'Withdraw fixed amount':    ContributionAmount= -data['ContributionAmount']
+    def __init__(self):
+        self.returns = []
 
-# 初始化 Cerebro 引擎
-cerebro = bt.Cerebro()
+    def next(self):
+        if len(self.data) > 1:
+            ret = (self.data.close[0] / self.data.close[-1]) - 1
+            self.returns.append(ret)
 
-# 添加策略
-cerebro.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount)
+    def get_analysis(self):
+        rf = 0
+        downside_risk = np.std([r for r in self.returns if r < rf]) * np.sqrt(252)
+        mean_return = np.mean(self.returns) * 252
+        sortino_ratio = (mean_return - rf) / downside_risk if downside_risk != 0 else 0
+        return {'sortino_ratio': sortino_ratio}
 
-# 設置初始資金
-cerebro.broker.setcash(initial_Amount)
-# 設置手續費
-cerebro.broker.setcommission(commission=0.001)
-#cerebro.addsizer(bt.sizers.PercentSizer, percents= 90)
+#計算TWRR
+class TWRRAnalyzer(bt.Analyzer):
+    
+    def __init__(self):
+        self.date_value = self.strategy.broker.startingcash  # 用于存储每个日期的 value
+        self.date_cash = self.strategy.broker.startingcash   # 用于存储每个日期的 cash
+        self.TWRR= 1
+    
+    def notify_cashvalue(self, cash, value):
+        if  self.date_cash!= cash:
+            self.TWRR*= value/self.date_value
+            self.date_cash= cash
+            self.date_value= value
+    
+    def get_analysis(self):
+        return  round(self.TWRR,4)
+
+#計算MWRR
+class MWRRAnalyzer(bt.Analyzer):
+    
+    def __init__(self):
+        self.cash_flows = []
+        self.previous_cash = None
+        self.previous_month = None
+        self.withdraw_amount = self.strategy.p.monthly_cash  # 每月定期领取的现金流金额，负数表示存入资金
+
+    def start(self):
+        self.initial_cash = self.strategy.broker.get_cash()
+    
+    def next(self):
+        current_cash = self.strategy.broker.get_cash()
+        
+        # 记录每日现金流变化
+        if self.previous_cash is not None:
+            daily_cash_flow = current_cash - self.previous_cash
+            self.cash_flows.append(daily_cash_flow)
+        
+        # 每月定期领取或存入资金
+        current_month = self.strategy.datas[0].datetime.date(0).month
+        if self.previous_month is not None and current_month != self.previous_month:
+            # 新的月份，记录定期现金流
+            self.cash_flows.append(-self.withdraw_amount)
+            self.strategy.broker.add_cash(-self.withdraw_amount)
+        
+        # 更新前一天的现金和月份
+        self.previous_cash = self.strategy.broker.get_cash()
+        self.previous_month = current_month
+
+    def stop(self):
+        # 在策略结束时记录最终现金流量
+        final_cash = self.strategy.broker.get_cash()
+        self.cash_flows.append(final_cash - self.previous_cash)
+        
+        # 计算 MWRR
+        mwrr = npf.irr(self.cash_flows)
+        self.rets['mwrr'] = mwrr
+
+    def get_analysis(self):
+        return  round(self.rets['mwrr'],4)
 
 
-# 添加數據
-data = bt.feeds.PandasData(dataname=yf.download("2330.TW", start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
-cerebro.adddata(data)
 
-# 添加分析器
-cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name= 'annualreturn')
-cerebro.addanalyzer(bt.analyzers.Returns, _name= 'returns')
-cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name='sharpe_ratio')
-cerebro.addanalyzer(bt.analyzers.DrawDown, _name='drawdown')
-cerebro.addanalyzer(bt.analyzers.PeriodStats, _name='periodstats')
-# 運行策略
-results= cerebro.run()
-
-# 獲取初始资金
-initial_cash = cerebro.broker.startingcash
-#獲取分析結果
-
-Roi= results[0].froi
-FinalBalance= cerebro.broker.getvalue()- initial_cash
-BestYear= max(results[0].analyzers.annualreturn.get_analysis().values())
-WorstYear= min(results[0].analyzers.annualreturn.get_analysis().values())
-sharpe_ratio = results[0].analyzers.sharpe_ratio.get_analysis()
-drawdown = results[0].analyzers.drawdown.get_analysis()
-periodstats= results[0].analyzers.periodstats.get_analysis()
+if __name__ == '__main__':
 
 
-print("投資報酬率:", Roi)
-print("最大標準差:", periodstats['stddev'])
-print("總複利回報:", FinalBalance)
-print("最佳年收入:", BestYear)
-print("最差年收入", WorstYear)
-print(f"夏普比率: {sharpe_ratio['sharperatio']}")
-print(f"最大回撤: {drawdown['max']['drawdown']}")
+    #獲取傳入json檔資料
+    with open('./buy_and_hold.json', 'r') as f:
+        data = json.load(f)
+    Timeperiod= data['EndYear']- data['StartYear']+ 1
+    StartYear, StartMonth= data['StartYear'], data['FirstMonth']
+    EndYear, EndMonth= data['EndYear'], data['LastMonth']
+    EndYear= data['EndYear']
+    initial_Amount= data['initialAmount']
+    ContributionAmount= 0
+    Withdraw_account= 0
+    Deposit_account= 0
 
-# 繪製結果
-cerebro.plot(style='candlestick', iplot=False,  start= date(2023,6,1), end= date(2024,5,4))
+    if data['CashFlows']== 'Contribute fixed amount':   ContributionAmount= data['ContributionAmount']
+    elif data['CashFlows']== 'Withdraw fixed amount':    ContributionAmount= -data['ContributionAmount']
+
+    #建立回傳字典
+    Returndict= {'StatusCode': 200, 'Message': 'Success', 'ReturnData': []}
+
+    #try:
+    for portfolio in data['Portfolios']:
+
+        # 設置回傳字典
+        Returndata= dict()
+        #抓出回測股票代號
+        StockID= portfolio['StockID']
+        
+        # 初始化 Cerebro 引擎 & 添加策略
+        cerebro = bt.Cerebro()
+        cerebro.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount)
+
+        # 設置初始資金 & 手續費
+        cerebro.broker.setcash(initial_Amount)
+        cerebro.broker.setcommission(commission=0.001)
+
+        # 添加個股相關數據
+        data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
+        cerebro.adddata(data)
+
+        # 添加分析器
+        cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name= 'annualreturn')
+        cerebro.addanalyzer(bt.analyzers.Returns, _name= 'returns')
+        cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name= 'sharpe_ratio')
+        cerebro.addanalyzer(SortinoRatio, _name= 'sortino_ratio')
+        cerebro.addanalyzer(bt.analyzers.Calmar, _name= 'calmar')
+        cerebro.addanalyzer(bt.analyzers.DrawDown, _name= 'drawdown')
+        cerebro.addanalyzer(bt.analyzers.PeriodStats, _name= 'periodstats')
+        cerebro.addanalyzer(TWRRAnalyzer, _name= 'twrr_analyzer')
+        cerebro.addanalyzer(MWRRAnalyzer, _name= 'mirr_analyzer')
+        
+        # 運行策略
+        results= cerebro.run()
+
+        #獲取分析結果
+        sharpe_ratio = results[0].analyzers.sharpe_ratio.get_analysis()
+        drawdown = results[0].analyzers.drawdown.get_analysis()
+        periodstats= results[0].analyzers.periodstats.get_analysis()
+        sortino_ratio = results[0].analyzers.sortino_ratio.get_analysis()
+        TWRR = results[0].analyzers.twrr_analyzer.get_analysis()
+        MIRR = results[0].analyzers.mirr_analyzer.get_analysis()
+        #empyrical.sortino_ratio(returns= Roi/Timeperiod_month ,annualization= 12)
+
+        print("投資報酬率:", results[0].Roi)
+        print("年均複合成長率: ", results[0].CAGR)
+        print("標準差:", round(periodstats['stddev'],2))
+        print("總複利回報:", results[0].FinalBalance)
+        print("最佳年收入:",results[0].BestYear)
+        print("最差年收入:", results[0].WorstYear)
+        print("時間加權報酬率:", TWRR)
+        print("資金加權報酬率:", MIRR)
+        print(f"夏普比率: {round(sharpe_ratio['sharperatio'],2)}")
+        print(f"最大回撤: {round(drawdown['max']['drawdown'],2)}")
+        print('索蒂諾比率:', round(sortino_ratio['sortino_ratio'],2))
+
+
+        Returndata['title']= results[0].title
+        Returndata['Portfolio']= results[0].Roi
+        Returndata['FinalBalance']= results[0].FinalBalance
+        Returndata['CAGR']= results[0].CAGR
+        Returndata['TWRR']= TWRR
+        Returndata['MIRR']= MIRR
+        Returndata['Stdev']= round(periodstats['stddev'],2)
+        Returndata['BestYear']= results[0].BestYear
+        Returndata['WorstYear']= results[0].WorstYear
+        Returndata['Max.Drawdown']= round(drawdown['max']['drawdown'],2)
+        Returndata['SharpeRatio']= round(sharpe_ratio['sharperatio'],2)
+        Returndata['SortioRatio']= round(sortino_ratio['sortino_ratio'],2)
+
+        #將股票回測結果貼上
+        Returndict['ReturnData'].append(Returndata)
+        # 繪製結果
+        #cerebro.plot(style='candlestick', iplot=False,  start= date(2023,6,1), end= date(2024,5,4))
+
+    #except: Returndict['Message']= 'Error'
+
+    # 輸出結果 JSON 文件
+    with open('./output.json', 'w', encoding='utf-8') as json_file:
+        json.dump(Returndict, json_file, ensure_ascii=False, indent=4)
