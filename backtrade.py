@@ -6,8 +6,6 @@ import calendar
 import matplotlib.pyplot as plt
 from datetime import date
 import math
-import numpy_financial as npf
-from scipy.optimize import newton
 
 
 #buy and hold 策略
