@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from datetime import date
 import math
 import numpy_financial as npf
+from scipy.optimize import newton
 
 
 #buy and hold 策略
@@ -22,6 +23,7 @@ class BuyAndHold_More_Fund(bt.Strategy):
         # Activate the fund mode and set the default value at 100
         #self.broker.set_fundmode(fundmode=True, fundstartval=100.00)
         self.title= 'Buy and hold'
+        self.cashflows = []
         self.cash_start = self.broker.get_cash()
         self.yearly_cash= dict()
         self.yearly_value= dict()
@@ -39,22 +41,22 @@ class BuyAndHold_More_Fund(bt.Strategy):
         else:
             self.p.deposit= self.p.withdraw
             self.p.withdraw= 0
-
-        self.Roi= round((self.broker.getvalue()+ self.p.withdraw)/(self.cash_start+ self.p.deposit)-1,2)
-        self.CAGR= round(math.pow(self.Roi+1, 1/(self.p.month_sum/12))-1,2)
-        self.FinalBalance= round(cerebro.broker.getvalue()- self.cash_start- self.p.month_sum*ContributionAmount,2)
+        
+        self.cashflows.append(self.broker.get_value())
+        self.Roi= round((self.broker.getvalue()+ self.p.withdraw)/(self.cash_start+ self.p.deposit)-1,3)
+        self.CAGR= round(math.pow(self.Roi+1, 1/(self.p.month_sum/12))-1,3)
+        self.FinalBalance= round(cerebro.broker.getvalue()- self.cash_start- self.p.month_sum*ContributionAmount,3)
         self.BestYear, self.WorstYear= self.YearReturn()
 
     def notify_timer(self, timer, when, *args, **kwargs):
         self.p.month_sum+= 1
 
-        if self.data.datetime.date(0).year not in self.yearly_cash:
+        if self.data.datetime.date(0).year not in self.yearly_cash: 
             self.yearly_cash[self.data.datetime.date(0).year]= 0
             self.yearly_value[self.data.datetime.date(0).year]= self.broker.get_value()
-
+        
         if self.broker.get_value()+ self.p.monthly_cash> 0:
-            self.order_target_value(target=int((self.broker.get_value()+ self.p.monthly_cash) * 0.99))
-
+            self.order_target_value(target= int((self.broker.get_value()+ self.p.monthly_cash) * 0.9))
             self.p.withdraw+= self.p.monthly_cash
             self.yearly_cash[self.data.datetime.date(0).year]+= self.p.monthly_cash
 
@@ -82,10 +84,12 @@ class BuyAndHold_More_Fund(bt.Strategy):
                 self.log('買入執行, 價格: {:.2f}, 成交量: {:.2f}'.format(
                     order.executed.price,
                     order.executed.size))
+                self.cashflows.append(-order.executed.price * order.executed.size)
             elif order.issell():
                 self.log('賣出執行, 價格: {:.2f}, 成交量: {:.2f}'.format(
                     order.executed.price,
                     order.executed.size))
+                self.cashflows.append(-order.executed.price * order.executed.size)
 
             self.bar_executed = len(self)
     def notify_trade(self, trade):
@@ -229,52 +233,21 @@ class TWRRAnalyzer(bt.Analyzer):
         return  round(self.TWRR,4)
 
 #計算MWRR
-class MWRRAnalyzer(bt.Analyzer):
-    
-    def __init__(self):
-        self.cash_flows = []
-        self.previous_cash = None
-        self.previous_month = None
-        self.withdraw_amount = self.strategy.p.monthly_cash  # 每月定期领取的现金流金额，负数表示存入资金
+def calculate_mirr(cashflows, finance_rate, reinvest_rate):
+    n = len(cashflows)
+    positive_cashflows = np.array([cf if cf > 0 else 0 for cf in cashflows])
+    negative_cashflows = np.array([cf if cf < 0 else 0 for cf in cashflows])
 
-    def start(self):
-        self.initial_cash = self.strategy.broker.get_cash()
-    
-    def next(self):
-        current_cash = self.strategy.broker.get_cash()
-        
-        # 记录每日现金流变化
-        if self.previous_cash is not None:
-            daily_cash_flow = current_cash - self.previous_cash
-            self.cash_flows.append(daily_cash_flow)
-        
-        # 每月定期领取或存入资金
-        current_month = self.strategy.datas[0].datetime.date(0).month
-        if self.previous_month is not None and current_month != self.previous_month:
-            # 新的月份，记录定期现金流
-            self.cash_flows.append(-self.withdraw_amount)
-            self.strategy.broker.add_cash(-self.withdraw_amount)
-        
-        # 更新前一天的现金和月份
-        self.previous_cash = self.strategy.broker.get_cash()
-        self.previous_month = current_month
+    pv_negative_cashflows = np.sum(negative_cashflows / (1 + finance_rate) ** np.arange(n))
+    fv_positive_cashflows = np.sum(positive_cashflows * (1 + reinvest_rate) ** (n - np.arange(n) - 1))
 
-    def stop(self):
-        # 在策略结束时记录最终现金流量
-        final_cash = self.strategy.broker.get_cash()
-        self.cash_flows.append(final_cash - self.previous_cash)
-        
-        # 计算 MWRR
-        mwrr = npf.irr(self.cash_flows)
-        self.rets['mwrr'] = mwrr
+    mirr = (fv_positive_cashflows / -pv_negative_cashflows) ** (1 / (n - 1)) - 1
+    return round(mirr, 4)
 
-    def get_analysis(self):
-        return  round(self.rets['mwrr'],4)
 
 
 
 if __name__ == '__main__':
-
 
     #獲取傳入json檔資料
     with open('./buy_and_hold.json', 'r') as f:
@@ -301,6 +274,7 @@ if __name__ == '__main__':
         Returndata= dict()
         #抓出回測股票代號
         StockID= portfolio['StockID']
+        print(StockID)
         
         # 初始化 Cerebro 引擎 & 添加策略
         cerebro = bt.Cerebro()
@@ -323,7 +297,6 @@ if __name__ == '__main__':
         cerebro.addanalyzer(bt.analyzers.DrawDown, _name= 'drawdown')
         cerebro.addanalyzer(bt.analyzers.PeriodStats, _name= 'periodstats')
         cerebro.addanalyzer(TWRRAnalyzer, _name= 'twrr_analyzer')
-        cerebro.addanalyzer(MWRRAnalyzer, _name= 'mirr_analyzer')
         
         # 運行策略
         results= cerebro.run()
@@ -334,8 +307,7 @@ if __name__ == '__main__':
         periodstats= results[0].analyzers.periodstats.get_analysis()
         sortino_ratio = results[0].analyzers.sortino_ratio.get_analysis()
         TWRR = results[0].analyzers.twrr_analyzer.get_analysis()
-        MIRR = results[0].analyzers.mirr_analyzer.get_analysis()
-        #empyrical.sortino_ratio(returns= Roi/Timeperiod_month ,annualization= 12)
+        MIRR = calculate_mirr(results[0].cashflows, 0.05, 0.07)
 
         print("投資報酬率:", results[0].Roi)
         print("年均複合成長率: ", results[0].CAGR)
