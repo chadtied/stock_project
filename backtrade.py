@@ -15,7 +15,8 @@ class BuyAndHold_More_Fund(bt.Strategy):
         month_sum= 0,
         withdraw= 0,
         deposit= 0,
-        allocation= []
+        allocation= [],
+        frequency= 1,
     )  
 
     def start(self):
@@ -61,13 +62,13 @@ class BuyAndHold_More_Fund(bt.Strategy):
                 self.order_target_value(data= d, target= int(0.9* self.p.allocation[iter]))
                 iter+= 1
 
-            self.p.withdraw+= self.p.monthly_cash
-            self.yearly_cash[self.data.datetime.date(0).year]+= self.p.monthly_cash
+            if self.p.frequency!= 0 and self.p.month_sum% self.p.frequency== 0:
+                print(self.data.datetime.date(0))
+                self.p.withdraw+= self.p.monthly_cash
+                self.yearly_cash[self.data.datetime.date(0).year]+= self.p.monthly_cash
+                self.broker.add_cash(self.p.monthly_cash)
 
-            # Add the influx of monthly cash to the broker
-            self.broker.add_cash(self.p.monthly_cash)
-
-        else:
+        elif self.p.month_sum% self.p.frequency== 0:
             for i, d in enumerate(self.datas):    self.order_target_value(data= d, target= 0)
 
     def YearReturn(self):
@@ -265,9 +266,14 @@ if __name__ == '__main__':
     ContributionAmount= 0
     Withdraw_account= 0
     Deposit_account= 0
+    Frequency= 0
 
     if data['CashFlows']== 'Contribute fixed amount':   ContributionAmount= data['ContributionAmount']
     elif data['CashFlows']== 'Withdraw fixed amount':    ContributionAmount= -data['ContributionAmount']
+    
+    if data['ContributionFrequency']== "Annually":  Frequency= 12
+    elif data["ContributionFrequency"]== "Monthly": Frequency= 1
+    elif data["ContributionFrequency"]== "Quarterly": Frequency= 6 
 
     #建立回傳字典
     Returndict= {'StatusCode': 200, 'Message': 'Success', 'ReturnData': []}
@@ -292,7 +298,7 @@ if __name__ == '__main__':
             stock_data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
             cerebro.adddata(stock_data)
             
-        cerebro.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount, allocation= Part)
+        cerebro.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount, allocation= Part, frequency= Frequency)
         
         # 設置初始資金 & 手續費
         cerebro.broker.setcash(initial_Amount)
