@@ -15,6 +15,7 @@ class BuyAndHold_More_Fund(bt.Strategy):
         month_sum= 0,
         withdraw= 0,
         deposit= 0,
+        allocation= []
     )  
 
     def start(self):
@@ -35,33 +36,39 @@ class BuyAndHold_More_Fund(bt.Strategy):
 
     def stop(self):
         if(self.p.monthly_cash< 0):
-            self.p.withdraw= -self.p.withdraw
+            self.p.deposit= 0
         else:
             self.p.deposit= self.p.withdraw
             self.p.withdraw= 0
+            
         
         self.cashflows.append(self.broker.get_value())
-        self.Roi= round((self.broker.getvalue()+ self.p.withdraw)/(self.cash_start+ self.p.deposit)-1,3)
+        self.Roi= round((self.broker.getvalue()- self.p.withdraw)/(self.cash_start+ self.p.deposit)-1,3)
         self.CAGR= round(math.pow(self.Roi+1, 1/(self.p.month_sum/12))-1,3)
-        self.FinalBalance= round(cerebro.broker.getvalue()- self.cash_start- self.p.month_sum*ContributionAmount,3)
+        self.FinalBalance= round(cerebro.broker.getvalue()- self.cash_start- self.p.withdraw,3)
         self.BestYear, self.WorstYear= self.YearReturn()
 
     def notify_timer(self, timer, when, *args, **kwargs):
         self.p.month_sum+= 1
-
+            
         if self.data.datetime.date(0).year not in self.yearly_cash: 
             self.yearly_cash[self.data.datetime.date(0).year]= 0
             self.yearly_value[self.data.datetime.date(0).year]= self.broker.get_value()
         
         if self.broker.get_value()+ self.p.monthly_cash> 0:
-            self.order_target_value(target= int((self.broker.get_value()+ self.p.monthly_cash) * 0.9))
+            iter= 0
+            for i, d in enumerate(self.datas):
+                self.order_target_value(data= d, target= int(0.9* self.p.allocation[iter]))
+                iter+= 1
+
             self.p.withdraw+= self.p.monthly_cash
             self.yearly_cash[self.data.datetime.date(0).year]+= self.p.monthly_cash
 
             # Add the influx of monthly cash to the broker
             self.broker.add_cash(self.p.monthly_cash)
 
-        else:   self.order_target_value(target= 0)
+        else:
+            for i, d in enumerate(self.datas):    self.order_target_value(data= d, target= 0)
 
     def YearReturn(self):
             value= list(self.yearly_value.values())
@@ -266,27 +273,33 @@ if __name__ == '__main__':
     Returndict= {'StatusCode': 200, 'Message': 'Success', 'ReturnData': []}
 
     #try:
-    for portfolio in data['Portfolios']:
-
+    for i in range(len(data['Portfolios'][0]['part'])):
+        
         # 設置回傳字典
         Returndata= dict()
-        #抓出回測股票代號
-        StockID= portfolio['StockID']
-        print(StockID)
+        Part= []
         
         # 初始化 Cerebro 引擎 & 添加策略
         cerebro = bt.Cerebro()
-        cerebro.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount)
-
+        
+        print(data['Portfolios'])
+        
+        for portfolio in data['Portfolios']:
+            #抓出回測股票代號
+            StockID= portfolio['StockID']
+            Part.append(int(initial_Amount*(portfolio['part'][i]/100)))
+            # 添加個股相關數據
+            stock_data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
+            cerebro.adddata(stock_data)
+            
+        cerebro.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount, allocation= Part)
+        
         # 設置初始資金 & 手續費
         cerebro.broker.setcash(initial_Amount)
         cerebro.broker.setcommission(commission=0.001)
 
-        # 添加個股相關數據
-        data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
-        cerebro.adddata(data)
-
         # 添加分析器
+        
         cerebro.addanalyzer(bt.analyzers.AnnualReturn, _name= 'annualreturn')
         cerebro.addanalyzer(bt.analyzers.Returns, _name= 'returns')
         cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name= 'sharpe_ratio')
@@ -320,7 +333,7 @@ if __name__ == '__main__':
         print('索蒂諾比率:', round(sortino_ratio['sortino_ratio'],2))
 
 
-        Returndata['title']= results[0].title
+        Returndata['title']= "Portfolio"+str(i+1)
         Returndata['Portfolio']= results[0].Roi
         Returndata['FinalBalance']= results[0].FinalBalance
         Returndata['CAGR']= results[0].CAGR
