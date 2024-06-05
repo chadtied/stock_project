@@ -17,6 +17,7 @@ class BuyAndHold_More_Fund(bt.Strategy):
         deposit= 0,
         allocation= [],
         frequency= 1,
+        rebalancing= 1,
     )  
 
     def start(self):
@@ -50,26 +51,27 @@ class BuyAndHold_More_Fund(bt.Strategy):
         self.BestYear, self.WorstYear= self.YearReturn()
 
     def notify_timer(self, timer, when, *args, **kwargs):
-        self.p.month_sum+= 1
             
-        if self.data.datetime.date(0).year not in self.yearly_cash: 
+        if self.data.datetime.date(0).year not in self.yearly_cash:
             self.yearly_cash[self.data.datetime.date(0).year]= 0
             self.yearly_value[self.data.datetime.date(0).year]= self.broker.get_value()
         
         if self.broker.get_value()+ self.p.monthly_cash> 0:
             iter= 0
-            for i, d in enumerate(self.datas):
-                self.order_target_value(data= d, target= int(0.9* self.p.allocation[iter]))
-                iter+= 1
+            if  self.p.month_sum% self.p.rebalancing== 0:
+                for i, d in enumerate(self.datas):
+                    self.order_target_value(data= d, target= int(0.9* self.broker.get_value()* self.p.allocation[iter]))
+                    iter+= 1
 
             if self.p.frequency!= 0 and self.p.month_sum% self.p.frequency== 0:
-                print(self.data.datetime.date(0))
                 self.p.withdraw+= self.p.monthly_cash
                 self.yearly_cash[self.data.datetime.date(0).year]+= self.p.monthly_cash
                 self.broker.add_cash(self.p.monthly_cash)
 
         elif self.p.month_sum% self.p.frequency== 0:
             for i, d in enumerate(self.datas):    self.order_target_value(data= d, target= 0)
+
+        self.p.month_sum+= 1
 
     def YearReturn(self):
             value= list(self.yearly_value.values())
@@ -262,9 +264,11 @@ if __name__ == '__main__':
     StartYear, StartMonth= data['StartYear'], data['FirstMonth']
     EndYear, EndMonth= data['EndYear'], data['LastMonth']
     EndYear= data['EndYear']
+    Rebalancing= 1
     initial_Amount= data['initialAmount']
     ContributionAmount= 0
     Withdraw_account= 0
+    Benhmark= data["Benhmark"]
     Deposit_account= 0
     Frequency= 0
 
@@ -273,7 +277,13 @@ if __name__ == '__main__':
     
     if data['ContributionFrequency']== "Annually":  Frequency= 12
     elif data["ContributionFrequency"]== "Monthly": Frequency= 1
-    elif data["ContributionFrequency"]== "Quarterly": Frequency= 6 
+    elif data["ContributionFrequency"]== "Quarterly": Frequency= 6
+
+    if data['Rebalancing']== "Annually":    Rebalancing= 12
+    elif data['Rebalancing']== "Monthly":   Rebalancing= 1
+    elif data['Rebalancing']== "Quarterly": Rebalancing= 3
+    elif data['Rebalancing']== "Semi-Annually": Rebalancing= 6
+
 
     #建立回傳字典
     Returndict= {'StatusCode': 200, 'Message': 'Success', 'ReturnData': []}
@@ -287,18 +297,27 @@ if __name__ == '__main__':
         
         # 初始化 Cerebro 引擎 & 添加策略
         cerebro = bt.Cerebro()
+        TWII= bt.Cerebro()
         
         print(data['Portfolios'])
         
         for portfolio in data['Portfolios']:
             #抓出回測股票代號
             StockID= portfolio['StockID']
-            Part.append(int(initial_Amount*(portfolio['part'][i]/100)))
+            Part.append(portfolio['part'][i]/100)
             # 添加個股相關數據
             stock_data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
             cerebro.adddata(stock_data)
+        #大盤購買策略
+        if Benhmark== 1:
+            stock_data = bt.feeds.PandasData(dataname=yf.download('^TWII', start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
+            TWII.adddata(stock_data)
+            TWII.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount, allocation= [1], frequency= Frequency, rebalancing= Rebalancing)
+            TWII.broker.setcash(initial_Amount)
+            TWII.broker.setcommission(commission=0.001)
+            TWII_results= TWII.run()
             
-        cerebro.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount, allocation= Part, frequency= Frequency)
+        cerebro.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount, allocation= Part, frequency= Frequency, rebalancing= Rebalancing)
         
         # 設置初始資金 & 手續費
         cerebro.broker.setcash(initial_Amount)
@@ -337,6 +356,7 @@ if __name__ == '__main__':
         print(f"夏普比率: {round(sharpe_ratio['sharperatio'],2)}")
         print(f"最大回撤: {round(drawdown['max']['drawdown'],2)}")
         print('索蒂諾比率:', round(sortino_ratio['sortino_ratio'],2))
+        if Benhmark==1: print('超越大盤: ', results[0].Roi- TWII_results[0].Roi)
 
 
         Returndata['title']= "Portfolio"+str(i+1)
@@ -351,6 +371,7 @@ if __name__ == '__main__':
         Returndata['Max.Drawdown']= round(drawdown['max']['drawdown'],2)
         Returndata['SharpeRatio']= round(sharpe_ratio['sharperatio'],2)
         Returndata['SortioRatio']= round(sortino_ratio['sortino_ratio'],2)
+        if Benhmark==1: Returndata['Benhmark']= round(results[0].Roi- TWII_results[0].Roi,3)
 
         #將股票回測結果貼上
         Returndict['ReturnData'].append(Returndata)
