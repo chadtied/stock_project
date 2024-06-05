@@ -68,7 +68,7 @@ class BuyAndHold_More_Fund(bt.Strategy):
                 self.yearly_cash[self.data.datetime.date(0).year]+= self.p.monthly_cash
                 self.broker.add_cash(self.p.monthly_cash)
 
-        elif self.p.month_sum% self.p.frequency== 0:
+        elif self.p.frequency!= 0 and self.p.month_sum% self.p.frequency== 0:
             for i, d in enumerate(self.datas):    self.order_target_value(data= d, target= 0)
 
         self.p.month_sum+= 1
