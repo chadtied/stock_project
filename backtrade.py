@@ -68,7 +68,7 @@ class BuyAndHold_More_Fund(bt.Strategy):
                 self.yearly_cash[self.data.datetime.date(0).year]+= self.p.monthly_cash
                 self.broker.add_cash(self.p.monthly_cash)
 
-        elif self.p.frequency!= 0 and self.p.month_sum% self.p.frequency== 0:
+        elif self.p.month_sum% self.p.frequency== 0:
             for i, d in enumerate(self.datas):    self.order_target_value(data= d, target= 0)
 
         self.p.month_sum+= 1
@@ -249,8 +249,11 @@ def calculate_mirr(cashflows, finance_rate, reinvest_rate):
     pv_negative_cashflows = np.sum(negative_cashflows / (1 + finance_rate) ** np.arange(n))
     fv_positive_cashflows = np.sum(positive_cashflows * (1 + reinvest_rate) ** (n - np.arange(n) - 1))
 
-    mirr = (fv_positive_cashflows / -pv_negative_cashflows) ** (1 / (n - 1)) - 1
-    return round(mirr, 4)
+    try:
+        mirr = (fv_positive_cashflows / -pv_negative_cashflows) ** (1 / (n - 1)) - 1
+        return round(mirr, 4)
+    except:
+        return 0
 
 
 
@@ -299,12 +302,11 @@ if __name__ == '__main__':
         cerebro = bt.Cerebro()
         TWII= bt.Cerebro()
         
-        print(data['Portfolios'])
-        
         for portfolio in data['Portfolios']:
             #抓出回測股票代號
             StockID= portfolio['StockID']
             Part.append(portfolio['part'][i]/100)
+
             # 添加個股相關數據
             stock_data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
             cerebro.adddata(stock_data)
@@ -374,7 +376,8 @@ if __name__ == '__main__':
         if Benhmark==1: Returndata['Benhmark']= round(results[0].Roi- TWII_results[0].Roi,3)
 
         #將股票回測結果貼上
-        Returndict['ReturnData'].append(Returndata)
+        if set(Part)!= {0}:
+            Returndict['ReturnData'].append(Returndata)
         # 繪製結果
         #cerebro.plot(style='candlestick', iplot=False,  start= date(2023,6,1), end= date(2024,5,4))
 
