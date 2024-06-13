@@ -249,11 +249,11 @@ def calculate_mirr(cashflows, finance_rate, reinvest_rate):
     pv_negative_cashflows = np.sum(negative_cashflows / (1 + finance_rate) ** np.arange(n))
     fv_positive_cashflows = np.sum(positive_cashflows * (1 + reinvest_rate) ** (n - np.arange(n) - 1))
 
-    try:
+    
+    if n!= 1 or pv_negative_cashflows!= 0:
         mirr = (fv_positive_cashflows / -pv_negative_cashflows) ** (1 / (n - 1)) - 1
         return round(mirr, 4)
-    except:
-        return 0
+    return 0
 
 
 
@@ -271,7 +271,7 @@ if __name__ == '__main__':
     initial_Amount= data['initialAmount']
     ContributionAmount= 0
     Withdraw_account= 0
-    Benhmark= data["Benhmark"]
+    Benhmark= data["Benchmark"]
     Deposit_account= 0
     Frequency= 0
 
@@ -347,6 +347,7 @@ if __name__ == '__main__':
         TWRR = results[0].analyzers.twrr_analyzer.get_analysis()
         MIRR = calculate_mirr(results[0].cashflows, 0.05, 0.07)
 
+        '''
         print("投資報酬率:", results[0].Roi)
         print("年均複合成長率: ", results[0].CAGR)
         print("標準差:", round(periodstats['stddev'],2))
@@ -359,21 +360,47 @@ if __name__ == '__main__':
         print(f"最大回撤: {round(drawdown['max']['drawdown'],2)}")
         print('索蒂諾比率:', round(sortino_ratio['sortino_ratio'],2))
         if Benhmark==1: print('超越大盤: ', results[0].Roi- TWII_results[0].Roi)
+        '''
 
+        try:Returndata['title']= "Portfolio"+str(i+1)   
+        except: Returndata['title']= 0
 
-        Returndata['title']= "Portfolio"+str(i+1)
-        Returndata['Portfolio']= results[0].Roi
-        Returndata['FinalBalance']= results[0].FinalBalance
-        Returndata['CAGR']= results[0].CAGR
-        Returndata['TWRR']= TWRR
-        Returndata['MIRR']= MIRR
-        Returndata['Stdev']= round(periodstats['stddev'],2)
-        Returndata['BestYear']= results[0].BestYear
-        Returndata['WorstYear']= results[0].WorstYear
-        Returndata['Max.Drawdown']= round(drawdown['max']['drawdown'],2)
-        Returndata['SharpeRatio']= round(sharpe_ratio['sharperatio'],2)
-        Returndata['SortioRatio']= round(sortino_ratio['sortino_ratio'],2)
-        if Benhmark==1: Returndata['Benhmark']= round(results[0].Roi- TWII_results[0].Roi,3)
+        try:Returndata['Portfolio']= results[0].Roi
+        except:Returndata['Portfolio']= 0
+        
+        try:Returndata['FinalBalance']= results[0].FinalBalance
+        except:Returndata['FinalBalance']= 0
+
+        try:Returndata['CAGR']= results[0].CAGR
+        except:Returndata['CAGR']= 0
+        
+        try:Returndata['TWRR']= TWRR
+        except:Returndata['TWRR']= 0
+        
+        try:Returndata['MIRR']= MIRR
+        except:Returndata['MIRR']= 0
+        
+        try:Returndata['Stdev']= round(periodstats['stddev'],2)
+        except:Returndata['Stdev']= 0
+
+        try:Returndata['BestYear']= results[0].BestYear
+        except:Returndata['BestYear']= 0
+        
+        try:Returndata['WorstYear']= results[0].WorstYear
+        except:Returndata['WorstYear']= 0
+
+        try:Returndata['Max.Drawdown']= round(drawdown['max']['drawdown'],2)
+        except:Returndata['Max.Drawdown']= 0
+
+        try:Returndata['SharpeRatio']= round(sharpe_ratio['sharperatio'],2)
+        except:Returndata['SharpeRatio']= 0
+
+        try:Returndata['SortioRatio']= round(sortino_ratio['sortino_ratio'],2)
+        except:Returndata['SortioRatio']= 0
+
+        if Benhmark==1: 
+            try:Returndata['Benhmark']= round(results[0].Roi- TWII_results[0].Roi,3)
+            except:Returndata['Benhmark']= round(results[0].Roi- TWII_results[0].Roi,3)
 
         #將股票回測結果貼上
         if set(Part)!= {0}:
