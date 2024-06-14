@@ -314,12 +314,12 @@ if __name__ == '__main__':
                     Part.append(portfolio['part'][i]/100)
 
                     # 添加個股相關數據
-                    stock_data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(StartYear, 1, 1), end= date(EndYear, 12, 31)))
+                    stock_data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(int(StartYear), 1, 1), end= date(int(EndYear), 12, 31)))
                     cerebro.adddata(stock_data)
                     
             #大盤購買策略
             if Benchmark== 1:
-                stock_data = bt.feeds.PandasData(dataname=yf.download('^TWII', start= date(StartYear, 1, 1), end= date(EndYear, 12, 31)))
+                stock_data = bt.feeds.PandasData(dataname=yf.download('^TWII', start= date(int(StartYear), 1, 1), end= date(int(EndYear), 12, 31)))
                 TWII.adddata(stock_data)
                 TWII.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount, allocation= [1], frequency= Frequency, rebalancing= Rebalancing)
                 TWII.broker.setcash(initial_Amount)
