@@ -259,34 +259,36 @@ def calculate_mirr(cashflows, finance_rate, reinvest_rate):
 
 
 if __name__ == '__main__':
-
+    
     #獲取傳入json檔資料
-    with open('./buy_and_hold.json', 'r') as f:
+    with open('./buy_and_hold.json', 'r', encoding= 'utf-8') as f:
         data = json.load(f)
-    Timeperiod= data['EndYear']- data['StartYear']+ 1
-    StartYear, StartMonth= data['StartYear'], data['FirstMonth']
-    EndYear, EndMonth= data['EndYear'], data['LastMonth']
+    Timeperiod= int(data['EndYear'])- int(data['StartYear'])+ 1
+    StartYear= data['StartYear']
+    EndYear= data['EndYear']
     EndYear= data['EndYear']
     Rebalancing= 1
-    initial_Amount= data['initialAmount']
+    initial_Amount= int(data['initialAmount'])
     ContributionAmount= 0
     Withdraw_account= 0
-    Benhmark= data["Benchmark"]
+    Benchmark= 1
     Deposit_account= 0
     Frequency= 0
 
-    if data['CashFlows']== 'Contribute fixed amount':   ContributionAmount= data['ContributionAmount']
-    elif data['CashFlows']== 'Withdraw fixed amount':    ContributionAmount= -data['ContributionAmount']
+    if data['CashFlows']== '固定投入':   ContributionAmount= int(data['ContributionAmount'])
+    elif data['CashFlows']== '固定領出':    ContributionAmount= -int(data['ContributionAmount'])
     
-    if data['ContributionFrequency']== "Annually":  Frequency= 12
-    elif data["ContributionFrequency"]== "Monthly": Frequency= 1
-    elif data["ContributionFrequency"]== "Quarterly": Frequency= 6
+    if data['ContributionFrequency']== "一年":  Frequency= 12
+    elif data["ContributionFrequency"]== "一個月":  Frequency= 1
+    elif data["ContributionFrequency"]== "三個月": Frequency= 6
 
-    if data['Rebalancing']== "Annually":    Rebalancing= 12
+
+    '''
+    if data['Rebalancing']== "Yes":    Rebalancing= 12
     elif data['Rebalancing']== "Monthly":   Rebalancing= 1
     elif data['Rebalancing']== "Quarterly": Rebalancing= 3
     elif data['Rebalancing']== "Semi-Annually": Rebalancing= 6
-
+    '''
 
     #建立回傳字典
     Returndict= {'StatusCode': 200, 'Message': 'Success', 'ReturnData': []}
@@ -305,14 +307,16 @@ if __name__ == '__main__':
         for portfolio in data['Portfolios']:
             #抓出回測股票代號
             StockID= portfolio['StockID']
-            Part.append(portfolio['part'][i]/100)
+            if StockID!= '':
+                Part.append(portfolio['part'][i]/100)
 
-            # 添加個股相關數據
-            stock_data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
-            cerebro.adddata(stock_data)
+                # 添加個股相關數據
+                stock_data = bt.feeds.PandasData(dataname=yf.download(StockID, start= date(int(StartYear), 1, 1), end= date(int(EndYear), 12, 31)))
+                cerebro.adddata(stock_data)
+                
         #大盤購買策略
-        if Benhmark== 1:
-            stock_data = bt.feeds.PandasData(dataname=yf.download('^TWII', start= date(StartYear, StartMonth, 1), end= date(EndYear, EndMonth, calendar.monthrange(EndYear, EndMonth)[1])))
+        if Benchmark== 1:
+            stock_data = bt.feeds.PandasData(dataname=yf.download('^TWII', start= date(int(StartYear), 1, 1), end= date(int(EndYear), 12, 31)))
             TWII.adddata(stock_data)
             TWII.addstrategy(BuyAndHold_More_Fund, monthly_cash= ContributionAmount, allocation= [1], frequency= Frequency, rebalancing= Rebalancing)
             TWII.broker.setcash(initial_Amount)
@@ -359,7 +363,7 @@ if __name__ == '__main__':
         print(f"夏普比率: {round(sharpe_ratio['sharperatio'],2)}")
         print(f"最大回撤: {round(drawdown['max']['drawdown'],2)}")
         print('索蒂諾比率:', round(sortino_ratio['sortino_ratio'],2))
-        if Benhmark==1: print('超越大盤: ', results[0].Roi- TWII_results[0].Roi)
+        if Benchmark==1: print('超越大盤: ', results[0].Roi- TWII_results[0].Roi)
         '''
 
         try:Returndata['title']= "Portfolio"+str(i+1)   
@@ -398,18 +402,22 @@ if __name__ == '__main__':
         try:Returndata['SortioRatio']= round(sortino_ratio['sortino_ratio'],2)
         except:Returndata['SortioRatio']= 0
 
-        if Benhmark==1: 
-            try:Returndata['Benhmark']= round(results[0].Roi- TWII_results[0].Roi,3)
-            except:Returndata['Benhmark']= round(results[0].Roi- TWII_results[0].Roi,3)
+        if Benchmark==1: 
+            try:Returndata['Benchmark']= round(results[0].Roi- TWII_results[0].Roi,3)
+            except:Returndata['Benchmark']= round(results[0].Roi- TWII_results[0].Roi,3)
 
         #將股票回測結果貼上
         if set(Part)!= {0}:
             Returndict['ReturnData'].append(Returndata)
         # 繪製結果
-        #cerebro.plot(style='candlestick', iplot=False,  start= date(2023,6,1), end= date(2024,5,4))
+        cerebro.plot(style='candlestick', iplot=False,  start= date(2023,6,1), end= date(2024,5,4))
 
     #except: Returndict['Message']= 'Error'
 
-    # 輸出結果 JSON 文件
+        # 輸出結果 JSON 文件
     with open('./output.json', 'w', encoding='utf-8') as json_file:
         json.dump(Returndict, json_file, ensure_ascii=False, indent=4)
+    '''
+    except:
+        print('報錯')
+    '''
